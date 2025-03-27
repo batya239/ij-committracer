@@ -18,6 +18,7 @@ import com.intellij.util.ui.components.BorderLayoutPanel
 import git4idea.repo.GitRepository
 import git4idea.history.GitHistoryUtils
 import java.awt.BorderLayout
+import java.awt.Component
 import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.GridBagConstraints
@@ -267,10 +268,31 @@ class CommitListDialog(
             columnModel.getColumn(0).preferredWidth = 80  // Hash
             columnModel.getColumn(1).preferredWidth = 150 // Author
             columnModel.getColumn(2).preferredWidth = 150 // Date
-            columnModel.getColumn(3).preferredWidth = 400 // Message
+            columnModel.getColumn(3).preferredWidth = 60  // Test
+            columnModel.getColumn(4).preferredWidth = 400 // Message
+            
+            // Center-align and use special renderer for the Test column
+            val testRenderer = object : DefaultTableCellRenderer() {
+                override fun getTableCellRendererComponent(
+                    table: JTable,
+                    value: Any?,
+                    isSelected: Boolean,
+                    hasFocus: Boolean,
+                    row: Int,
+                    column: Int
+                ): Component {
+                    val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+                    text = if (value == true) "Yes" else "No"
+                    horizontalAlignment = SwingConstants.CENTER
+                    return component
+                }
+            }
+            columnModel.getColumn(3).cellRenderer = testRenderer
             
             // Add row sorter for sorting
             val sorter = TableRowSorter(tableModel)
+            // Add correct comparator for the boolean Test column
+            sorter.setComparator(3, Comparator.comparing<Any, Boolean> { it as Boolean })
             rowSorter = sorter
         }
         
@@ -311,6 +333,10 @@ class CommitListDialog(
                             append(CommitTracerBundle.message("dialog.branch.label", commit.branches.joinToString(", ")))
                             append("\n")
                         }
+                        
+                        // Add test changes indicator
+                        append(CommitTracerBundle.message("dialog.test.changes", if (commit.modifiesTests) "Yes" else "No"))
+                        append("\n")
                         
                         append("\nMessage:\n$message")
                     }
@@ -446,10 +472,31 @@ class CommitListDialog(
                     authorCommitsTable.columnModel.getColumn(0).preferredWidth = 80  // Hash
                     authorCommitsTable.columnModel.getColumn(1).preferredWidth = 150 // Author
                     authorCommitsTable.columnModel.getColumn(2).preferredWidth = 150 // Date
-                    authorCommitsTable.columnModel.getColumn(3).preferredWidth = 400 // Message
+                    authorCommitsTable.columnModel.getColumn(3).preferredWidth = 60  // Test
+                    authorCommitsTable.columnModel.getColumn(4).preferredWidth = 400 // Message
+                    
+                    // Custom renderer for the Test column
+                    val testRenderer = object : DefaultTableCellRenderer() {
+                        override fun getTableCellRendererComponent(
+                            table: JTable,
+                            value: Any?,
+                            isSelected: Boolean,
+                            hasFocus: Boolean,
+                            row: Int,
+                            column: Int
+                        ): Component {
+                            val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+                            text = if (value == true) "Yes" else "No"
+                            horizontalAlignment = SwingConstants.CENTER
+                            return component
+                        }
+                    }
+                    authorCommitsTable.columnModel.getColumn(3).cellRenderer = testRenderer
                     
                     // Add row sorter for author commits table
                     val sorter = TableRowSorter(authorCommitsModel)
+                    // Add correct comparator for the boolean Test column
+                    sorter.setComparator(3, Comparator.comparing<Any, Boolean> { it as Boolean })
                     authorCommitsTable.rowSorter = sorter
                     
                     authorCommitsLabel.text = CommitTracerBundle.message("dialog.author.commits", author.author, authorCommits.size.toString())
@@ -509,7 +556,35 @@ class CommitListDialog(
                                 // Update author commits table to show only commits related to this ticket
                                 val ticketCommitsModel = CommitTableModel(ticketInfo.commits)
                                 authorCommitsTable.model = ticketCommitsModel
-                                authorCommitsTable.rowSorter = TableRowSorter(ticketCommitsModel)
+                                val ticketSorter = TableRowSorter(ticketCommitsModel)
+                                // Add correct comparator for the boolean Test column
+                                ticketSorter.setComparator(3, Comparator.comparing<Any, Boolean> { it as Boolean })
+                                authorCommitsTable.rowSorter = ticketSorter
+                                
+                                // Configure columns for ticket commits
+                                authorCommitsTable.columnModel.getColumn(0).preferredWidth = 80  // Hash
+                                authorCommitsTable.columnModel.getColumn(1).preferredWidth = 150 // Author
+                                authorCommitsTable.columnModel.getColumn(2).preferredWidth = 150 // Date
+                                authorCommitsTable.columnModel.getColumn(3).preferredWidth = 60  // Test
+                                authorCommitsTable.columnModel.getColumn(4).preferredWidth = 400 // Message
+                                
+                                // Custom renderer for the Test column
+                                val testRenderer = object : DefaultTableCellRenderer() {
+                                    override fun getTableCellRendererComponent(
+                                        table: JTable,
+                                        value: Any?,
+                                        isSelected: Boolean,
+                                        hasFocus: Boolean,
+                                        row: Int,
+                                        column: Int
+                                    ): Component {
+                                        val component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+                                        text = if (value == true) "Yes" else "No"
+                                        horizontalAlignment = SwingConstants.CENTER
+                                        return component
+                                    }
+                                }
+                                authorCommitsTable.columnModel.getColumn(3).cellRenderer = testRenderer
 
                                 // Update label
                                 authorCommitsLabel.text = CommitTracerBundle.message("dialog.ticket.commits", ticketInfo.ticketId, ticketInfo.commits.size.toString())
@@ -559,6 +634,7 @@ class CommitListDialog(
             CommitTracerBundle.message("dialog.column.hash"),
             CommitTracerBundle.message("dialog.column.author"),
             CommitTracerBundle.message("dialog.column.date"),
+            CommitTracerBundle.message("dialog.column.test"), // Column for test files indicator
             CommitTracerBundle.message("dialog.column.message")
         )
 
@@ -572,6 +648,13 @@ class CommitListDialog(
         override fun getColumnCount(): Int = columns.size
 
         override fun getColumnName(column: Int): String = columns[column]
+        
+        override fun getColumnClass(columnIndex: Int): Class<*> {
+            return when (columnIndex) {
+                3 -> Boolean::class.java // The Test column is a boolean
+                else -> String::class.java
+            }
+        }
 
         override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
             val commit = commits[rowIndex]
@@ -586,7 +669,8 @@ class CommitListDialog(
                 }
                 1 -> commit.author
                 2 -> commit.date
-                3 -> {
+                3 -> commit.modifiesTests // Return whether this commit modifies test files
+                4 -> {
                     // Get first line of commit message or truncate if necessary
                     val message = commit.message.lines().firstOrNull() ?: ""
                     if (message.length > 100) message.substring(0, 97) + "..." else message

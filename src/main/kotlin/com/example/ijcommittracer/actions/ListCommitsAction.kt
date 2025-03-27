@@ -6,11 +6,15 @@ import com.example.ijcommittracer.ui.CommitListDialog
 import com.example.ijcommittracer.ui.SelectRepositoryDialog
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.guessProjectDir
+import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.vcs.ProjectLevelVcsManager
 import git4idea.GitCommit
 import git4idea.history.GitHistoryUtils
@@ -220,6 +224,49 @@ class ListCommitsAction : AnAction(), DumbAware {
         return GitRepositoryManager.getInstance(project).repositories
     }
     
+    /**
+     * Checks if any of the changed files in a commit are test files.
+     */
+    private fun commitModifiesTestFiles(project: Project, gitCommit: GitCommit): Boolean {
+        val fileIndex = ProjectRootManager.getInstance(project).fileIndex
+        val root = project.guessProjectDir()
+        
+        // Check each changed file in the commit
+        return gitCommit.changes.any { change ->
+            val testPath = when {
+                change.afterRevision != null -> {
+                    val filePath = change.afterRevision?.file ?: return@any false
+                    val virtualFile = root?.findFileByRelativePath(filePath.path)
+                    if (virtualFile != null && virtualFile.isValid) {
+                        // Use readAction to safely access isInTestSourceContent
+                        ApplicationManager.getApplication().runReadAction<Boolean> {
+                            fileIndex.isInTestSourceContent(virtualFile)
+                        }
+                    } else {
+                        // Fallback to path-based detection if we can't get the VirtualFile
+                        filePath.path.contains("/test/")
+                    }
+                }
+                change.beforeRevision != null -> {
+                    val filePath = change.beforeRevision?.file  ?: return@any false
+                    val virtualFile = root?.findFileByRelativePath(filePath.path)
+                    if (virtualFile != null && virtualFile.isValid) {
+                        // Use readAction to safely access isInTestSourceContent
+                        ApplicationManager.getApplication().runReadAction<Boolean> {
+                            fileIndex.isInTestSourceContent(virtualFile)
+                        }
+                    } else {
+                        // Fallback to path-based detection if we can't get the VirtualFile
+                        filePath.path.contains("/test/")
+                    }
+                }
+                else -> false
+            }
+            
+            testPath
+        }
+    }
+    
     private fun getCommits(
         project: Project,
         repository: GitRepository,
@@ -247,6 +294,8 @@ class ListCommitsAction : AnAction(), DumbAware {
         
         return commits.map { gitCommit ->
             val commitDate = Date(gitCommit.authorTime)
+            val modifiesTests = commitModifiesTestFiles(project, gitCommit)
+            
             CommitInfo(
                 hash = gitCommit.id.toString(),
                 author = gitCommit.author.email,
@@ -254,7 +303,8 @@ class ListCommitsAction : AnAction(), DumbAware {
                 dateObj = commitDate, // Store actual Date object for sorting
                 message = gitCommit.fullMessage.trim(),
                 repositoryName = repository.root.name,
-                branches = listOfNotNull(currentBranch).takeIf { isCommitInCurrentBranch(gitCommit, repository) } ?: emptyList()
+                branches = listOfNotNull(currentBranch).takeIf { isCommitInCurrentBranch(gitCommit, repository) } ?: emptyList(),
+                modifiesTests = modifiesTests
             )
         }
     }
@@ -280,7 +330,8 @@ class ListCommitsAction : AnAction(), DumbAware {
         val dateObj: Date, // For internal use in filtering and sorting
         val message: String,
         val repositoryName: String,
-        val branches: List<String> = emptyList()
+        val branches: List<String> = emptyList(),
+        val modifiesTests: Boolean = false
     )
 
     /**
